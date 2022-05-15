@@ -125,7 +125,10 @@ export default function NativeScanner({ scan, onResult }: ZbarProps): React.Reac
       return;
     }
 
-    const handler = (event: CustomEvent) => {
+    const handler = (event: Event) => {
+      if (!(event instanceof CustomEvent)) {
+        throw new Error();
+      }
       onResult(event.detail);
     };
 
