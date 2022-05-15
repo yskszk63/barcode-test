@@ -1,5 +1,22 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Quagga from "quagga";
+
+class DetectEvent extends Event {
+  data?: unknown | undefined;
+
+  constructor(type: string, opts: { data: unknown }) {
+    super(type);
+    this.data = opts.data;
+  }
+}
+
+interface QuaggaEventTarget extends EventTarget {
+  addEventListener(type: "detect", callback: ((this: QuaggaEventTarget, event: DetectEvent) => void) | null): void;
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | AddEventListenerOptions): void;
+
+  removeEventListener(type: "detect", callback: ((this: QuaggaEventTarget, event: DetectEvent) => void) | null): void;
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject, options?: boolean | EventListenerOptions): void;
+}
 
 let queue = Promise.resolve<unknown>(void 0);
 function queued<T>(task: () => T | PromiseLike<T>): Promise<T> {
@@ -14,6 +31,7 @@ type QuaggaProps = {
 }
 
 export default function QuaggaScanner({scan, onResult}: QuaggaProps): React.ReactElement {
+  const [events] = useState<QuaggaEventTarget>(() => new EventTarget() as QuaggaEventTarget);
   const div = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -31,6 +49,12 @@ export default function QuaggaScanner({scan, onResult}: QuaggaProps): React.Reac
     signal.addEventListener("abort", () => queued(() => Quagga.stop()));
 
     queued(() => new Promise<void>((resolve, reject) => {
+      const handler = (data: unknown) => {
+        events.dispatchEvent(new DetectEvent("detect", { data }));
+      }
+      Quagga.onDetected(handler);
+      signal.addEventListener("abort", () => queued(() => Quagga.offDetected(handler)));
+
       const conf = {
         inputStream: {
           name: "Live",
@@ -54,20 +78,16 @@ export default function QuaggaScanner({scan, onResult}: QuaggaProps): React.Reac
     })).catch(console.error);
 
     return () => abort.abort();
-  }, [scan, div]);
+  }, [scan, div, events]);
 
   useEffect(() => {
-    if (!scan) {
-      return;
-    }
-
-    const handler = (data: unknown) => {
-      onResult?.(data);
+    const handler = (event: DetectEvent) => {
+      onResult?.(event.data);
     };
-    queued(() => Quagga.onDetected(handler));
+    events.addEventListener("detect", handler);
 
-    return () => void queued(() => Quagga.offDetected(handler));
-  }, [scan, onResult]);
+    return () => events.removeEventListener("detect", handler);
+  }, [onResult, events]);
 
   return (
     <>
